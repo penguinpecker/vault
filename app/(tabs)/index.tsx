@@ -17,15 +17,10 @@ import Animated, { FadeInUp } from 'react-native-reanimated';
 import { theme } from '../../constants/theme';
 import { Icons } from '../../components/ui';
 import { useHoldings } from '../../context/HoldingsContext';
+import { useCurrency } from '../../context/CurrencyContext';
 
 // Format utilities
-const formatCurrency = (value: number | null | undefined, compact = false): string => {
-  if (value === null || value === undefined) return 'N/A';
-  if (compact && Math.abs(value) >= 1000) {
-    return (value < 0 ? '-' : '') + '$' + (Math.abs(value) / 1000).toFixed(1) + 'k';
-  }
-  return '$' + value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+// formatCurrency replaced by useCurrency().formatPrice
 
 const formatPercent = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return 'N/A';
@@ -47,7 +42,7 @@ const Sparkline = ({ positive }: { positive: boolean }) => (
 );
 
 // Radial Chart Component
-const RadialChart = ({ allocations, totalValue, showBalance }: { allocations: any[], totalValue: number, showBalance: boolean }) => {
+const RadialChart = ({ allocations, totalValue, showBalance, formatPrice }: { allocations: any[], totalValue: number, showBalance: boolean, formatPrice: (v: number, c?: boolean) => string }) => {
   let rotation = -90;
   const hasData = allocations.some(a => a.percent > 0);
   
@@ -125,7 +120,7 @@ const RadialChart = ({ allocations, totalValue, showBalance }: { allocations: an
       <View style={styles.chartCenter}>
         <Text style={styles.chartLabel}>TOTAL</Text>
         <Text style={styles.chartValue}>
-          {totalValue === 0 ? '$0.00' : (showBalance ? formatCurrency(totalValue, true) : '•••••')}
+          {totalValue === 0 ? '$0.00' : (showBalance ? formatPrice(totalValue, true) : '•••••')}
         </Text>
       </View>
     </View>
@@ -135,6 +130,7 @@ const RadialChart = ({ allocations, totalValue, showBalance }: { allocations: an
 export default function PortfolioScreen() {
   const router = useRouter();
   const { holdings, metrics, allocations } = useHoldings();
+  const { formatPrice } = useCurrency();
   const [showBalance, setShowBalance] = useState(true);
   
   const isEmpty = holdings.length === 0;
@@ -173,7 +169,7 @@ export default function PortfolioScreen() {
           <Text style={styles.heroLabel}>TOTAL PORTFOLIO VALUE</Text>
           <View style={styles.heroValueRow}>
             <Text style={[styles.heroValue, isEmpty && styles.heroValueEmpty]}>
-              {isEmpty ? '$0.00' : (showBalance ? formatCurrency(metrics.totalValue) : '$•••,•••.••')}
+              {isEmpty ? '$0.00' : (showBalance ? formatPrice(metrics.totalValue) : '$•••,•••.••')}
             </Text>
             <TouchableOpacity 
               style={styles.eyeButton}
@@ -211,7 +207,8 @@ export default function PortfolioScreen() {
           <RadialChart 
             allocations={allocations} 
             totalValue={metrics.totalValue} 
-            showBalance={showBalance} 
+            showBalance={showBalance}
+            formatPrice={formatPrice}
           />
         </Animated.View>
 
@@ -222,7 +219,7 @@ export default function PortfolioScreen() {
               <View>
                 <Text style={styles.legendName}>{item.name}</Text>
                 <Text style={styles.legendValue}>
-                  {item.value === 0 ? 'N/A' : (showBalance ? formatCurrency(item.value, true) : '•••')}
+                  {item.value === 0 ? 'N/A' : (showBalance ? formatPrice(item.value, true) : '•••')}
                 </Text>
               </View>
               <Text style={styles.legendPercent}>{item.percent}%</Text>
@@ -264,7 +261,7 @@ export default function PortfolioScreen() {
           <View style={[styles.bentoItem, !isEmpty && styles.bentoItemHighlight]}>
             <Text style={styles.bentoLabel}>ALL-TIME GAIN</Text>
             <Text style={[styles.bentoValue, !isEmpty && styles.bentoValueGold]}>
-              {isEmpty ? 'N/A' : (showBalance ? (metrics.totalGain >= 0 ? '+' : '') + formatCurrency(metrics.totalGain, true) : '•••')}
+              {isEmpty ? 'N/A' : (showBalance ? (metrics.totalGain >= 0 ? '+' : '') + formatPrice(metrics.totalGain, true) : '•••')}
             </Text>
             <Text style={[styles.bentoSub, !isEmpty && styles.bentoSubGold]}>
               {isEmpty ? 'N/A' : formatPercent(metrics.totalGainPercent)}
@@ -273,7 +270,7 @@ export default function PortfolioScreen() {
           <View style={styles.bentoItem}>
             <Text style={styles.bentoLabel}>TODAY</Text>
             <Text style={styles.bentoValue}>
-              {isEmpty ? 'N/A' : (showBalance ? (metrics.dayChange >= 0 ? '+' : '') + formatCurrency(metrics.dayChange, true) : '•••')}
+              {isEmpty ? 'N/A' : (showBalance ? (metrics.dayChange >= 0 ? '+' : '') + formatPrice(metrics.dayChange, true) : '•••')}
             </Text>
             <Text style={[styles.bentoSub, !isEmpty && styles.bentoSubGold]}>
               {isEmpty ? 'N/A' : formatPercent(metrics.dayChangePercent)}
@@ -287,7 +284,7 @@ export default function PortfolioScreen() {
           <View style={styles.bentoItem}>
             <Text style={styles.bentoLabel}>TOTAL COST</Text>
             <Text style={styles.bentoValue}>
-              {isEmpty ? 'N/A' : (showBalance ? formatCurrency(metrics.totalCost, true) : '•••')}
+              {isEmpty ? 'N/A' : (showBalance ? formatPrice(metrics.totalCost, true) : '•••')}
             </Text>
             <Text style={styles.bentoSub}>Invested</Text>
           </View>
@@ -341,7 +338,7 @@ export default function PortfolioScreen() {
                     <Sparkline positive={positive} />
                     <View style={styles.holdingValues}>
                       <Text style={styles.holdingValue}>
-                        {showBalance ? formatCurrency(holding.currentValue, true) : '•••'}
+                        {showBalance ? formatPrice(holding.currentValue, true) : '•••'}
                       </Text>
                       <Text style={[styles.holdingChange, positive && styles.holdingChangePositive]}>
                         {formatPercent(holding.dayChangePercent)}

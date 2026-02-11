@@ -17,14 +17,9 @@ import Animated, { FadeInUp } from 'react-native-reanimated';
 import { theme } from '../../constants/theme';
 import { Icons } from '../../components/ui';
 import { useHoldings } from '../../context/HoldingsContext';
+import { useCurrency } from '../../context/CurrencyContext';
 
-const formatCurrency = (value: number | null | undefined, compact = false): string => {
-  if (value === null || value === undefined) return 'N/A';
-  if (compact && Math.abs(value) >= 1000) {
-    return (value < 0 ? '-' : '') + '$' + (Math.abs(value) / 1000).toFixed(1) + 'k';
-  }
-  return '$' + value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+// formatCurrency replaced by useCurrency().formatPrice
 
 const formatPercent = (value: number | null | undefined): string => {
   if (value === null || value === undefined) return 'N/A';
@@ -63,6 +58,7 @@ const FILTERS = ['all', 'crypto', 'stocks', 'etfs', 'commodities'];
 export default function HoldingsScreen() {
   const router = useRouter();
   const { holdings, removeHolding, metrics } = useHoldings();
+  const { formatPrice } = useCurrency();
   const [searchText, setSearchText] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
   const [showBalance, setShowBalance] = useState(true);
@@ -188,7 +184,7 @@ export default function HoldingsScreen() {
         <Animated.View entering={FadeInUp.delay(400)} style={styles.summaryBar}>
           <Text style={styles.summaryCount}>{filteredHoldings.length} assets</Text>
           <Text style={styles.summaryValue}>
-            {isEmpty ? 'N/A' : formatCurrency(totalFiltered)}
+            {isEmpty ? 'N/A' : formatPrice(totalFiltered)}
           </Text>
         </Animated.View>
 
@@ -260,7 +256,7 @@ export default function HoldingsScreen() {
                   
                   <View style={styles.holdingValues}>
                     <Text style={styles.holdingValue}>
-                      {showBalance ? formatCurrency(holding.currentValue, true) : '•••'}
+                      {showBalance ? formatPrice(holding.currentValue, true) : '•••'}
                     </Text>
                     <Text
                       style={[
@@ -276,7 +272,7 @@ export default function HoldingsScreen() {
                         holding.gain >= 0 && styles.holdingGainPositive,
                       ]}
                     >
-                      {showBalance ? formatCurrency(holding.gain, true) : '•••'}
+                      {showBalance ? formatPrice(holding.gain, true) : '•••'}
                     </Text>
                   </View>
                   

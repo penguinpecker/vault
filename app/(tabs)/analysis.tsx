@@ -1,414 +1,516 @@
-// VAULT - Risk Analysis Screen
-// ORIGINAL DESIGN - Now with real data from HoldingsContext
+// VAULT - Risk Analysis Screen (DYNAMIC)
+// Uses real portfolio data from HoldingsContext
 
 import React, { useMemo } from 'react';
 import {
   View,
   Text,
   ScrollView,
+  TouchableOpacity,
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path, Line, Circle, Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, { Path, Circle, Defs, LinearGradient, Stop, G, Text as SvgText } from 'react-native-svg';
 import Animated, { FadeInUp } from 'react-native-reanimated';
-
 import { theme } from '../../constants/theme';
-import { Icons, Card, SectionHeader } from '../../components/ui';
+import { Icons } from '../../components/ui';
 import { useHoldings } from '../../context/HoldingsContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Format currency helper
+// Format utilities
 const formatCurrency = (value: number, compact = false): string => {
   if (value === null || value === undefined) return 'N/A';
   if (compact && Math.abs(value) >= 1000) {
-    return '$' + (value / 1000).toFixed(1) + 'k';
+    return (value < 0 ? '-' : '') + '$' + (Math.abs(value) / 1000).toFixed(1) + 'k';
   }
   return '$' + value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-export default function AnalysisScreen() {
-  const { holdings, metrics, allocations } = useHoldings();
+const formatPercent = (value: number): string => {
+  return value.toFixed(1) + '%';
+};
+
+// Risk level colors
+const getRiskColor = (score: number) => {
+  if (score <= 30) return '#22C55E'; // Green - Low
+  if (score <= 50) return '#EAB308'; // Yellow - Moderate  
+  if (score <= 70) return '#F97316'; // Orange - High
+  return '#EF4444'; // Red - Very High
+};
+
+const getRiskLabel = (score: number) => {
+  if (score <= 30) return 'Low Risk';
+  if (score <= 50) return 'Moderate';
+  if (score <= 70) return 'High Risk';
+  return 'Very High';
+};
+
+// Speedometer Component
+const RiskSpeedometer = ({ score }: { score: number }) => {
+  const size = SCREEN_WIDTH - 80;
+  const strokeWidth = 20;
+  const radius = (size - strokeWidth) / 2;
+  const centerX = size / 2;
+  const centerY = size / 2;
   
-  // Metal colors for easy reference
-  const metals = {
-    gold: theme.colors.gold,
-    silver: theme.colors.silver,
-    bronze: theme.colors.bronze,
-    copper: theme.colors.copper,
-    brass: theme.colors.brass,
-  };
-
-  // ============================================
-  // RISK ANALYSIS ALGORITHM (NOW USING REAL DATA)
-  // ============================================
-  const riskAnalysis = useMemo(() => {
-    // Handle empty portfolio
-    if (holdings.length === 0) {
-      return {
-        overallRisk: 0,
-        riskLevel: 'N/A',
-        riskColor: metals.gold,
-        breakdown: [
-          { label: 'Concentration', score: 0, color: metals.gold },
-          { label: 'Asset Risk', score: 0, color: metals.silver },
-          { label: 'Diversification', score: 0, color: metals.copper },
-          { label: 'Volatility', score: 0, color: metals.brass },
-        ],
-        recommendations: [{
-          type: 'info' as const,
-          text: 'No Portfolio Data',
-          suggestion: 'Add assets to see your risk analysis',
-        }],
-        holdingsVolatility: [],
-      };
-    }
-
-    const totalValue = metrics.totalValue;
-
-    // 1. Concentration Risk (0-100) - based on largest holding percentage
-    const sortedByValue = [...holdings].sort((a, b) => b.currentValue - a.currentValue);
-    const largestHolding = sortedByValue[0];
-    const maxAllocation = (largestHolding.currentValue / totalValue) * 100;
-    const concentrationRisk = maxAllocation > 50 ? 90 : maxAllocation > 40 ? 80 : maxAllocation > 30 ? 60 : maxAllocation > 20 ? 40 : 20;
-
-    // 2. Weighted Asset Type Risk
-    const typeRiskMap: Record<string, number> = {
-      'crypto': 90,
-      'stock': 55,
-      'etf': 30,
-      'commodity': 40,
-    };
-    
-    let weightedTypeRisk = 0;
-    holdings.forEach(h => {
-      const weight = h.currentValue / totalValue;
-      weightedTypeRisk += (typeRiskMap[h.type] || 50) * weight;
-    });
-
-    // 3. Diversification Score - number of assets and types
-    const numAssets = holdings.length;
-    const uniqueTypes = new Set(holdings.map(h => h.type)).size;
-    let diversificationRisk = numAssets >= 10 ? 20 : numAssets >= 5 ? 35 : numAssets >= 3 ? 50 : 70;
-    if (uniqueTypes === 1) diversificationRisk += 15;
-    diversificationRisk = Math.min(100, diversificationRisk);
-
-    // 4. Volatility Risk - based on day changes and asset types
-    const avgAbsChange = holdings.reduce((sum, h) => sum + Math.abs(h.dayChangePercent), 0) / holdings.length;
-    const volatilityRisk = Math.min(100, Math.round(avgAbsChange * 12 + weightedTypeRisk * 0.4));
-
-    // Overall Risk Score
-    const overallRisk = Math.round(
-      concentrationRisk * 0.25 +
-      weightedTypeRisk * 0.35 +
-      diversificationRisk * 0.20 +
-      volatilityRisk * 0.20
-    );
-
-    // Risk Level
-    let riskLevel: string, riskColor: typeof metals.gold;
-    if (overallRisk <= 30) {
-      riskLevel = 'Conservative';
-      riskColor = metals.gold;
-    } else if (overallRisk <= 45) {
-      riskLevel = 'Moderate-Low';
-      riskColor = metals.brass;
-    } else if (overallRisk <= 60) {
-      riskLevel = 'Moderate';
-      riskColor = metals.silver;
-    } else if (overallRisk <= 75) {
-      riskLevel = 'Aggressive';
-      riskColor = metals.copper;
-    } else {
-      riskLevel = 'Very Aggressive';
-      riskColor = metals.bronze;
-    }
-
-    // Breakdown - each with different metal color
-    const breakdown = [
-      { label: 'Concentration', score: Math.round(concentrationRisk), color: metals.gold },
-      { label: 'Asset Risk', score: Math.round(weightedTypeRisk), color: metals.silver },
-      { label: 'Diversification', score: Math.round(diversificationRisk), color: metals.copper },
-      { label: 'Volatility', score: Math.round(volatilityRisk), color: metals.brass },
-    ];
-
-    // Recommendations based on real data
-    const recommendations: Array<{ type: 'warning' | 'info' | 'success'; text: string; suggestion: string }> = [];
-    
-    // Check crypto allocation
-    const cryptoValue = holdings.filter(h => h.type === 'crypto').reduce((sum, h) => sum + h.currentValue, 0);
-    const cryptoPercent = totalValue > 0 ? (cryptoValue / totalValue) * 100 : 0;
-    
-    if (cryptoPercent > 40) {
-      recommendations.push({
-        type: 'warning',
-        text: `High Crypto Exposure (${cryptoPercent.toFixed(0)}%)`,
-        suggestion: 'Consider reducing to below 40% for stability',
-      });
-    }
-    if (maxAllocation > 40) {
-      recommendations.push({
-        type: 'warning',
-        text: `Concentration Risk in ${largestHolding.symbol}`,
-        suggestion: `${maxAllocation.toFixed(0)}% in one asset. Consider rebalancing.`,
-      });
-    }
-    if (uniqueTypes < 3) {
-      recommendations.push({
-        type: 'info',
-        text: 'Limited Diversification',
-        suggestion: 'Adding different asset types could reduce risk',
-      });
-    }
-    if (numAssets < 5) {
-      recommendations.push({
-        type: 'info',
-        text: 'Few Holdings',
-        suggestion: 'Consider adding more positions to spread risk',
-      });
-    }
-    if (recommendations.length === 0) {
-      recommendations.push({
-        type: 'success',
-        text: 'Well-Balanced Portfolio',
-        suggestion: 'Your allocation appears well-diversified',
-      });
-    }
-
-    // Holdings with volatility (calculated from type and day change)
-    const holdingsVolatility = holdings.map(h => ({
-      ...h,
-      volatility: Math.min(1, (typeRiskMap[h.type] || 50) / 100 * 0.6 + Math.abs(h.dayChangePercent) / 15),
-    })).sort((a, b) => b.volatility - a.volatility);
-
+  // Arc goes from 135deg to 405deg (270deg sweep)
+  const startAngle = 135;
+  const endAngle = 405;
+  const sweepAngle = 270;
+  
+  // Calculate needle position
+  const needleAngle = startAngle + (score / 100) * sweepAngle;
+  const needleRadians = (needleAngle * Math.PI) / 180;
+  const needleLength = radius - 30;
+  const needleX = centerX + needleLength * Math.cos(needleRadians);
+  const needleY = centerY + needleLength * Math.sin(needleRadians);
+  
+  // Create arc path
+  const polarToCartesian = (cx: number, cy: number, r: number, angle: number) => {
+    const rad = (angle * Math.PI) / 180;
     return {
-      overallRisk,
-      riskLevel,
-      riskColor,
-      breakdown,
-      recommendations,
-      holdingsVolatility,
+      x: cx + r * Math.cos(rad),
+      y: cy + r * Math.sin(rad),
     };
-  }, [holdings, metrics, allocations]);
-
-  // Risk Gauge Component (ORIGINAL DESIGN)
-  const RiskGauge = () => {
-    const angle = (riskAnalysis.overallRisk / 100) * 180 - 90;
-    const needleX = 100 + 55 * Math.cos((angle * Math.PI) / 180);
-    const needleY = 100 + 55 * Math.sin((angle * Math.PI) / 180);
-
-    return (
-      <Svg width={SCREEN_WIDTH - 80} height={140} viewBox="0 0 200 120">
+  };
+  
+  const createArc = (start: number, end: number) => {
+    const startPoint = polarToCartesian(centerX, centerY, radius, start);
+    const endPoint = polarToCartesian(centerX, centerY, radius, end);
+    const largeArcFlag = end - start <= 180 ? 0 : 1;
+    return `M ${startPoint.x} ${startPoint.y} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${endPoint.x} ${endPoint.y}`;
+  };
+  
+  // Score arc
+  const scoreEndAngle = startAngle + (score / 100) * sweepAngle;
+  
+  return (
+    <View style={styles.speedometerContainer}>
+      <Svg width={size} height={size * 0.7}>
         <Defs>
-          <LinearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <Stop offset="0%" stopColor={metals.gold.primary} />
-            <Stop offset="25%" stopColor={metals.brass.primary} />
-            <Stop offset="50%" stopColor={metals.silver.primary} />
-            <Stop offset="75%" stopColor={metals.copper.primary} />
-            <Stop offset="100%" stopColor={metals.bronze.primary} />
+          <LinearGradient id="riskGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <Stop offset="0%" stopColor="#22C55E" />
+            <Stop offset="33%" stopColor="#EAB308" />
+            <Stop offset="66%" stopColor="#F97316" />
+            <Stop offset="100%" stopColor="#EF4444" />
           </LinearGradient>
         </Defs>
         
         {/* Background arc */}
         <Path
-          d="M 20 100 A 80 80 0 0 1 180 100"
+          d={createArc(startAngle, endAngle)}
           fill="none"
-          stroke={theme.colors.grey[900]}
-          strokeWidth={14}
+          stroke={theme.colors.grey[800]}
+          strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
         
-        {/* Colored arc */}
+        {/* Colored arc based on score */}
         <Path
-          d="M 20 100 A 80 80 0 0 1 180 100"
+          d={createArc(startAngle, scoreEndAngle)}
           fill="none"
-          stroke="url(#gaugeGrad)"
-          strokeWidth={14}
+          stroke={getRiskColor(score)}
+          strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
+        
+        {/* Tick marks */}
+        {[0, 25, 50, 75, 100].map((tick, i) => {
+          const angle = startAngle + (tick / 100) * sweepAngle;
+          const innerPoint = polarToCartesian(centerX, centerY, radius - strokeWidth / 2 - 5, angle);
+          const outerPoint = polarToCartesian(centerX, centerY, radius - strokeWidth / 2 - 15, angle);
+          return (
+            <Path
+              key={i}
+              d={`M ${innerPoint.x} ${innerPoint.y} L ${outerPoint.x} ${outerPoint.y}`}
+              stroke={theme.colors.grey[600]}
+              strokeWidth={2}
+            />
+          );
+        })}
         
         {/* Needle */}
-        <Line
-          x1={100}
-          y1={100}
-          x2={needleX}
-          y2={needleY}
-          stroke={riskAnalysis.riskColor.primary}
-          strokeWidth={3}
-          strokeLinecap="round"
-        />
-        <Circle cx={100} cy={100} r={8} fill={riskAnalysis.riskColor.primary} />
-        <Circle cx={100} cy={100} r={4} fill={theme.colors.black.rich} />
+        <G>
+          <Circle cx={centerX} cy={centerY} r={12} fill={theme.colors.grey[800]} />
+          <Path
+            d={`M ${centerX} ${centerY} L ${needleX} ${needleY}`}
+            stroke={getRiskColor(score)}
+            strokeWidth={4}
+            strokeLinecap="round"
+          />
+          <Circle cx={centerX} cy={centerY} r={6} fill={getRiskColor(score)} />
+        </G>
         
         {/* Labels */}
-        <SvgText x={20} y={115} fill={theme.colors.grey[500]} fontSize={10} textAnchor="middle">Low</SvgText>
-        <SvgText x={180} y={115} fill={theme.colors.grey[500]} fontSize={10} textAnchor="middle">High</SvgText>
+        <SvgText x={40} y={size * 0.65} fill={theme.colors.grey[500]} fontSize={12} textAnchor="middle">Low</SvgText>
+        <SvgText x={size - 40} y={size * 0.65} fill={theme.colors.grey[500]} fontSize={12} textAnchor="middle">High</SvgText>
       </Svg>
-    );
-  };
+      
+      {/* Score display */}
+      <View style={styles.scoreDisplay}>
+        <Text style={[styles.scoreValue, { color: getRiskColor(score) }]}>{Math.round(score)}</Text>
+        <Text style={[styles.scoreLabel, { color: getRiskColor(score) }]}>{getRiskLabel(score)}</Text>
+      </View>
+    </View>
+  );
+};
 
+// Risk Factor Card
+const RiskFactor = ({ 
+  title, 
+  value, 
+  status, 
+  description,
+  icon,
+}: { 
+  title: string; 
+  value: string; 
+  status: 'good' | 'warning' | 'danger';
+  description: string;
+  icon: React.ReactNode;
+}) => {
+  const statusColors = {
+    good: '#22C55E',
+    warning: '#EAB308',
+    danger: '#EF4444',
+  };
+  
+  return (
+    <View style={styles.riskFactorCard}>
+      <View style={styles.riskFactorHeader}>
+        <View style={[styles.riskFactorIcon, { backgroundColor: statusColors[status] + '20' }]}>
+          {icon}
+        </View>
+        <View style={styles.riskFactorTitleContainer}>
+          <Text style={styles.riskFactorTitle}>{title}</Text>
+          <Text style={[styles.riskFactorValue, { color: statusColors[status] }]}>{value}</Text>
+        </View>
+      </View>
+      <Text style={styles.riskFactorDescription}>{description}</Text>
+    </View>
+  );
+};
+
+// Allocation Bar
+const AllocationBar = ({ allocations }: { allocations: { name: string; percent: number; color: string }[] }) => {
+  const totalPercent = allocations.reduce((sum, a) => sum + a.percent, 0);
+  
+  return (
+    <View style={styles.allocationContainer}>
+      <View style={styles.allocationBar}>
+        {allocations.filter(a => a.percent > 0).map((alloc, i) => (
+          <View
+            key={i}
+            style={[
+              styles.allocationSegment,
+              { 
+                width: `${alloc.percent}%`,
+                backgroundColor: alloc.color,
+                borderTopLeftRadius: i === 0 ? 8 : 0,
+                borderBottomLeftRadius: i === 0 ? 8 : 0,
+                borderTopRightRadius: i === allocations.filter(a => a.percent > 0).length - 1 ? 8 : 0,
+                borderBottomRightRadius: i === allocations.filter(a => a.percent > 0).length - 1 ? 8 : 0,
+              }
+            ]}
+          />
+        ))}
+      </View>
+      <View style={styles.allocationLegend}>
+        {allocations.map((alloc, i) => (
+          <View key={i} style={styles.allocationLegendItem}>
+            <View style={[styles.allocationDot, { backgroundColor: alloc.color }]} />
+            <Text style={styles.allocationLegendText}>{alloc.name}</Text>
+            <Text style={styles.allocationLegendPercent}>{alloc.percent}%</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+
+export default function AnalysisScreen() {
+  const { holdings, metrics, allocations } = useHoldings();
+  
+  // Calculate risk metrics
+  const riskMetrics = useMemo(() => {
+    if (holdings.length === 0) {
+      return {
+        overallScore: 0,
+        concentrationRisk: 0,
+        volatilityRisk: 0,
+        diversificationScore: 0,
+        largestHolding: null,
+        cryptoPercent: 0,
+        assetCount: 0,
+        recommendations: ['Add assets to start analyzing your portfolio risk.'],
+      };
+    }
+    
+    const totalValue = metrics.totalValue;
+    
+    // 1. Concentration Risk - largest holding as % of portfolio
+    const sortedByValue = [...holdings].sort((a, b) => b.currentValue - a.currentValue);
+    const largestHolding = sortedByValue[0];
+    const concentrationPercent = (largestHolding.currentValue / totalValue) * 100;
+    
+    // Score: 0-30 if <25%, 30-60 if 25-50%, 60-100 if >50%
+    let concentrationRisk = 0;
+    if (concentrationPercent <= 25) {
+      concentrationRisk = (concentrationPercent / 25) * 30;
+    } else if (concentrationPercent <= 50) {
+      concentrationRisk = 30 + ((concentrationPercent - 25) / 25) * 30;
+    } else {
+      concentrationRisk = 60 + ((concentrationPercent - 50) / 50) * 40;
+    }
+    
+    // 2. Volatility Risk - based on asset types
+    // Crypto = high volatility, stocks = medium, commodities = low-medium, ETFs = low
+    const volatilityWeights: Record<string, number> = {
+      crypto: 80,
+      stock: 40,
+      commodity: 30,
+      etf: 20,
+    };
+    
+    let weightedVolatility = 0;
+    holdings.forEach(h => {
+      const weight = h.currentValue / totalValue;
+      const typeVolatility = volatilityWeights[h.type] || 50;
+      weightedVolatility += weight * typeVolatility;
+    });
+    
+    // 3. Diversification Score - number of assets and type spread
+    const assetCount = holdings.length;
+    const uniqueTypes = new Set(holdings.map(h => h.type)).size;
+    
+    // More assets = lower risk (up to a point)
+    let diversificationPenalty = 0;
+    if (assetCount === 1) diversificationPenalty = 50;
+    else if (assetCount === 2) diversificationPenalty = 30;
+    else if (assetCount <= 5) diversificationPenalty = 15;
+    else if (assetCount <= 10) diversificationPenalty = 5;
+    else diversificationPenalty = 0;
+    
+    // Fewer types = higher risk
+    if (uniqueTypes === 1) diversificationPenalty += 20;
+    else if (uniqueTypes === 2) diversificationPenalty += 10;
+    
+    // Calculate crypto percentage
+    const cryptoValue = holdings.filter(h => h.type === 'crypto').reduce((sum, h) => sum + h.currentValue, 0);
+    const cryptoPercent = (cryptoValue / totalValue) * 100;
+    
+    // Overall risk score (0-100)
+    const overallScore = Math.min(100, Math.round(
+      (concentrationRisk * 0.35) + 
+      (weightedVolatility * 0.4) + 
+      (diversificationPenalty * 0.25)
+    ));
+    
+    // Generate recommendations
+    const recommendations: string[] = [];
+    
+    if (concentrationPercent > 50) {
+      recommendations.push(`${largestHolding.symbol} represents ${formatPercent(concentrationPercent)} of your portfolio. Consider diversifying.`);
+    } else if (concentrationPercent > 30) {
+      recommendations.push(`Your largest holding (${largestHolding.symbol}) is ${formatPercent(concentrationPercent)} of portfolio.`);
+    }
+    
+    if (cryptoPercent > 50) {
+      recommendations.push(`High crypto exposure (${formatPercent(cryptoPercent)}). Consider adding more stable assets.`);
+    }
+    
+    if (assetCount < 5) {
+      recommendations.push('Adding more assets could improve diversification.');
+    }
+    
+    if (uniqueTypes < 3) {
+      recommendations.push('Consider diversifying across more asset types (stocks, ETFs, commodities).');
+    }
+    
+    if (recommendations.length === 0) {
+      recommendations.push('Your portfolio appears well-balanced. Keep monitoring regularly.');
+    }
+    
+    return {
+      overallScore,
+      concentrationRisk: Math.round(concentrationRisk),
+      volatilityRisk: Math.round(weightedVolatility),
+      diversificationScore: 100 - diversificationPenalty,
+      largestHolding,
+      cryptoPercent,
+      assetCount,
+      recommendations,
+    };
+  }, [holdings, metrics]);
+  
+  // Get top gainers and losers
+  const sortedByChange = useMemo(() => {
+    if (holdings.length === 0) return { gainers: [], losers: [] };
+    const sorted = [...holdings].sort((a, b) => b.dayChangePercent - a.dayChangePercent);
+    return {
+      gainers: sorted.filter(h => h.dayChangePercent > 0).slice(0, 3),
+      losers: sorted.filter(h => h.dayChangePercent < 0).slice(0, 3),
+    };
+  }, [holdings]);
+  
   const isEmpty = holdings.length === 0;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <Animated.View entering={FadeInUp.duration(600)} style={styles.header}>
-          <Text style={styles.pageTitle}>Risk Analysis</Text>
+        <Animated.View entering={FadeInUp.delay(100)} style={styles.header}>
+          <Text style={styles.title}>Risk Analysis</Text>
+          <TouchableOpacity style={styles.infoButton}>
+            <Icons.Shield color={theme.colors.grey[400]} size={20} />
+          </TouchableOpacity>
         </Animated.View>
 
-        {/* Main Risk Score Card */}
-        <Animated.View entering={FadeInUp.duration(600).delay(100)} style={styles.riskCard}>
-          <View style={styles.riskHeader}>
-            <View style={styles.riskIconContainer}>
-              <Icons.Shield color={metals.gold.primary} size={20} />
-            </View>
-            <View style={styles.riskTitleGroup}>
-              <Text style={styles.riskTitle}>Portfolio Risk Score</Text>
-              <View style={[styles.riskBadge, { backgroundColor: `${riskAnalysis.riskColor.primary}20` }]}>
-                <Text style={[styles.riskBadgeText, { color: riskAnalysis.riskColor.primary }]}>
-                  {riskAnalysis.riskLevel}
-                </Text>
-              </View>
-            </View>
-          </View>
-          
-          <View style={styles.riskScoreContainer}>
-            <Text style={[styles.riskScoreBig, { color: riskAnalysis.riskColor.primary }]}>
-              {riskAnalysis.overallRisk}
-            </Text>
-            <Text style={styles.riskScoreMax}>/100</Text>
-          </View>
-          
-          <View style={styles.gaugeContainer}>
-            <RiskGauge />
-          </View>
-        </Animated.View>
+        {isEmpty ? (
+          /* Empty State */
+          <Animated.View entering={FadeInUp.delay(200)} style={styles.emptyState}>
+            <Icons.Shield color={theme.colors.grey[600]} size={64} />
+            <Text style={styles.emptyTitle}>No Portfolio Data</Text>
+            <Text style={styles.emptyText}>Add assets to your portfolio to see risk analysis.</Text>
+          </Animated.View>
+        ) : (
+          <>
+            {/* Risk Speedometer */}
+            <Animated.View entering={FadeInUp.delay(200)}>
+              <RiskSpeedometer score={riskMetrics.overallScore} />
+            </Animated.View>
 
-        {/* Risk Breakdown */}
-        <Animated.View entering={FadeInUp.duration(600).delay(200)}>
-          <SectionHeader title="Risk Breakdown" />
-          <Card style={styles.breakdownCard}>
-            {riskAnalysis.breakdown.map((item, i) => (
-              <View key={i} style={styles.breakdownItem}>
-                <Text style={styles.breakdownLabel}>{item.label}</Text>
-                <View style={styles.breakdownBarTrack}>
-                  <View
-                    style={[
-                      styles.breakdownBarFill,
-                      { width: `${item.score}%`, backgroundColor: item.color.primary },
-                    ]}
-                  />
-                </View>
-                <Text style={[styles.breakdownScore, { color: item.color.primary }]}>
-                  {item.score}
-                </Text>
+            {/* Quick Stats */}
+            <Animated.View entering={FadeInUp.delay(300)} style={styles.quickStats}>
+              <View style={styles.quickStatItem}>
+                <Text style={styles.quickStatValue}>{riskMetrics.assetCount}</Text>
+                <Text style={styles.quickStatLabel}>Assets</Text>
               </View>
-            ))}
-          </Card>
-        </Animated.View>
+              <View style={styles.quickStatDivider} />
+              <View style={styles.quickStatItem}>
+                <Text style={styles.quickStatValue}>{formatPercent(riskMetrics.cryptoPercent)}</Text>
+                <Text style={styles.quickStatLabel}>Crypto</Text>
+              </View>
+              <View style={styles.quickStatDivider} />
+              <View style={styles.quickStatItem}>
+                <Text style={styles.quickStatValue}>{riskMetrics.diversificationScore}</Text>
+                <Text style={styles.quickStatLabel}>Diversity</Text>
+              </View>
+            </Animated.View>
 
-        {/* Recommendations */}
-        <Animated.View entering={FadeInUp.duration(600).delay(300)}>
-          <SectionHeader title="Recommendations" />
-          {riskAnalysis.recommendations.map((rec, i) => (
-            <View
-              key={i}
-              style={[
-                styles.recCard,
-                {
-                  borderLeftColor:
-                    rec.type === 'warning' ? metals.copper.primary :
-                    rec.type === 'success' ? metals.gold.primary : metals.brass.primary,
-                },
-              ]}
-            >
-              <View style={styles.recIcon}>
-                {rec.type === 'warning' && <Icons.TrendUp color={metals.copper.primary} size={16} />}
-                {rec.type === 'success' && <Icons.Shield color={metals.gold.primary} size={16} />}
-                {rec.type === 'info' && <Icons.Stats color={metals.brass.primary} size={16} />}
-              </View>
-              <View style={styles.recContent}>
-                <Text style={styles.recText}>{rec.text}</Text>
-                <Text style={styles.recSuggestion}>{rec.suggestion}</Text>
-              </View>
-            </View>
-          ))}
-        </Animated.View>
+            {/* Allocation */}
+            <Animated.View entering={FadeInUp.delay(400)} style={styles.section}>
+              <Text style={styles.sectionTitle}>Asset Allocation</Text>
+              <AllocationBar allocations={allocations} />
+            </Animated.View>
 
-        {/* Allocation Risk */}
-        {!isEmpty && (
-          <Animated.View entering={FadeInUp.duration(600).delay(400)}>
-            <SectionHeader title="Allocation Risk" />
-            {allocations.filter(a => a.percent > 0).map((alloc, i) => {
-              // Map allocation names to risk levels
-              const typeRiskLevels: Record<string, { level: string; color: string }> = {
-                'Crypto': { level: 'High Risk', color: metals.bronze.primary },
-                'Stocks': { level: 'Medium Risk', color: metals.silver.primary },
-                'ETFs': { level: 'Low Risk', color: metals.gold.primary },
-                'Commodities': { level: 'Medium Risk', color: metals.brass.primary },
-              };
-              const riskInfo = typeRiskLevels[alloc.name] || { level: 'Medium', color: metals.silver.primary };
+            {/* Risk Factors */}
+            <Animated.View entering={FadeInUp.delay(500)} style={styles.section}>
+              <Text style={styles.sectionTitle}>Risk Factors</Text>
               
-              return (
-                <View key={i} style={styles.allocCard}>
-                  <View style={styles.allocHeader}>
-                    <View style={[styles.allocDot, { backgroundColor: alloc.color }]} />
-                    <Text style={styles.allocName}>{alloc.name}</Text>
-                    <Text style={styles.allocPercent}>{alloc.percent}%</Text>
+              <RiskFactor
+                title="Concentration"
+                value={riskMetrics.largestHolding ? `${formatPercent((riskMetrics.largestHolding.currentValue / metrics.totalValue) * 100)} in ${riskMetrics.largestHolding.symbol}` : 'N/A'}
+                status={riskMetrics.concentrationRisk < 30 ? 'good' : riskMetrics.concentrationRisk < 60 ? 'warning' : 'danger'}
+                description="How much of your portfolio is in a single asset"
+                icon={<Icons.TrendUp color={riskMetrics.concentrationRisk < 30 ? '#22C55E' : riskMetrics.concentrationRisk < 60 ? '#EAB308' : '#EF4444'} size={18} />}
+              />
+              
+              <RiskFactor
+                title="Volatility Exposure"
+                value={riskMetrics.volatilityRisk < 40 ? 'Low' : riskMetrics.volatilityRisk < 60 ? 'Medium' : 'High'}
+                status={riskMetrics.volatilityRisk < 40 ? 'good' : riskMetrics.volatilityRisk < 60 ? 'warning' : 'danger'}
+                description="Based on your mix of crypto, stocks, and stable assets"
+                icon={<Icons.Stats color={riskMetrics.volatilityRisk < 40 ? '#22C55E' : riskMetrics.volatilityRisk < 60 ? '#EAB308' : '#EF4444'} size={18} />}
+              />
+              
+              <RiskFactor
+                title="Diversification"
+                value={`${riskMetrics.diversificationScore}/100`}
+                status={riskMetrics.diversificationScore > 70 ? 'good' : riskMetrics.diversificationScore > 40 ? 'warning' : 'danger'}
+                description="Number of assets and variety of asset types"
+                icon={<Icons.Shield color={riskMetrics.diversificationScore > 70 ? '#22C55E' : riskMetrics.diversificationScore > 40 ? '#EAB308' : '#EF4444'} size={18} />}
+              />
+            </Animated.View>
+
+            {/* Top Movers */}
+            {(sortedByChange.gainers.length > 0 || sortedByChange.losers.length > 0) && (
+              <Animated.View entering={FadeInUp.delay(600)} style={styles.section}>
+                <Text style={styles.sectionTitle}>Today's Movers</Text>
+                
+                <View style={styles.moversContainer}>
+                  {/* Gainers */}
+                  <View style={styles.moverColumn}>
+                    <Text style={styles.moverColumnTitle}>📈 Gainers</Text>
+                    {sortedByChange.gainers.length === 0 ? (
+                      <Text style={styles.noMovers}>No gainers today</Text>
+                    ) : (
+                      sortedByChange.gainers.map((h, i) => (
+                        <View key={h.id} style={styles.moverItem}>
+                          <Text style={styles.moverSymbol}>{h.symbol}</Text>
+                          <Text style={styles.moverGain}>+{h.dayChangePercent.toFixed(2)}%</Text>
+                        </View>
+                      ))
+                    )}
                   </View>
-                  <View style={styles.allocBarTrack}>
-                    <View
-                      style={[styles.allocBarFill, { width: `${alloc.percent}%`, backgroundColor: alloc.color }]}
-                    />
-                  </View>
-                  <View style={styles.allocFooter}>
-                    <Text style={styles.allocValue}>{formatCurrency(alloc.value, true)}</Text>
-                    <Text style={[styles.allocRisk, { color: riskInfo.color }]}>{riskInfo.level}</Text>
+                  
+                  {/* Losers */}
+                  <View style={styles.moverColumn}>
+                    <Text style={styles.moverColumnTitle}>📉 Losers</Text>
+                    {sortedByChange.losers.length === 0 ? (
+                      <Text style={styles.noMovers}>No losers today</Text>
+                    ) : (
+                      sortedByChange.losers.map((h, i) => (
+                        <View key={h.id} style={styles.moverItem}>
+                          <Text style={styles.moverSymbol}>{h.symbol}</Text>
+                          <Text style={styles.moverLoss}>{h.dayChangePercent.toFixed(2)}%</Text>
+                        </View>
+                      ))
+                    )}
                   </View>
                 </View>
-              );
-            })}
-          </Animated.View>
-        )}
+              </Animated.View>
+            )}
 
-        {/* Volatility by Asset */}
-        {!isEmpty && riskAnalysis.holdingsVolatility.length > 0 && (
-          <Animated.View entering={FadeInUp.duration(600).delay(500)}>
-            <SectionHeader title="Volatility by Asset" />
-            <Card>
-              {riskAnalysis.holdingsVolatility.slice(0, 5).map((h, i) => {
-                const volColors = [metals.gold, metals.silver, metals.bronze, metals.copper, metals.brass];
-                const color = volColors[i % 5];
-                return (
-                  <View key={h.id} style={styles.volItem}>
-                    <Text style={styles.volSymbol}>{h.symbol}</Text>
-                    <View style={styles.volBarTrack}>
-                      <View
-                        style={[
-                          styles.volBarFill,
-                          { width: `${h.volatility * 100}%`, backgroundColor: color.primary },
-                        ]}
-                      />
-                    </View>
-                    <Text style={[styles.volValue, { color: color.primary }]}>
-                      {Math.round(h.volatility * 100)}%
-                    </Text>
+            {/* Recommendations */}
+            <Animated.View entering={FadeInUp.delay(700)} style={styles.section}>
+              <Text style={styles.sectionTitle}>💡 Recommendations</Text>
+              <View style={styles.recommendationsCard}>
+                {riskMetrics.recommendations.map((rec, i) => (
+                  <View key={i} style={styles.recommendationItem}>
+                    <View style={styles.recommendationBullet} />
+                    <Text style={styles.recommendationText}>{rec}</Text>
                   </View>
-                );
-              })}
-            </Card>
-          </Animated.View>
-        )}
+                ))}
+              </View>
+            </Animated.View>
 
-        <View style={{ height: 100 }} />
+            {/* Portfolio Summary */}
+            <Animated.View entering={FadeInUp.delay(800)} style={styles.summaryCard}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Total Portfolio Value</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(metrics.totalValue)}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Total Invested</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(metrics.totalCost)}</Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>All-Time P/L</Text>
+                <Text style={[styles.summaryValue, { color: metrics.totalGain >= 0 ? theme.colors.gold.primary : '#EF4444' }]}>
+                  {metrics.totalGain >= 0 ? '+' : ''}{formatCurrency(metrics.totalGain)} ({formatPercent(metrics.totalGainPercent)})
+                </Text>
+              </View>
+            </Animated.View>
+          </>
+        )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -421,226 +523,273 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: theme.spacing.xl,
+    padding: 20,
+    paddingBottom: 100,
   },
-
-  // Header
   header: {
-    marginBottom: theme.spacing.xl,
-    marginTop: theme.spacing.md,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
   },
-  pageTitle: {
+  title: {
     fontSize: 28,
     fontWeight: '700',
     color: theme.colors.white.pure,
   },
-
-  // Risk Card
-  riskCard: {
+  infoButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: theme.colors.black.card,
     borderWidth: 1,
     borderColor: theme.colors.grey[800],
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: theme.spacing.xl,
-  },
-  riskHeader: {
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
   },
-  riskIconContainer: {
-    width: 40,
-    height: 40,
-    backgroundColor: `${theme.colors.gold.primary}15`,
-    borderRadius: 12,
+  emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 80,
   },
-  riskTitleGroup: {
-    flex: 1,
-    gap: 6,
-  },
-  riskTitle: {
-    fontSize: 16,
+  emptyTitle: {
+    fontSize: 20,
     fontWeight: '600',
     color: theme.colors.white.pure,
-  },
-  riskBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  riskBadgeText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  riskScoreContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'center',
+    marginTop: 20,
     marginBottom: 8,
   },
-  riskScoreBig: {
-    fontSize: 56,
+  emptyText: {
+    fontSize: 14,
+    color: theme.colors.grey[500],
+    textAlign: 'center',
+  },
+  speedometerContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  scoreDisplay: {
+    alignItems: 'center',
+    marginTop: -60,
+  },
+  scoreValue: {
+    fontSize: 48,
     fontWeight: '700',
   },
-  riskScoreMax: {
+  scoreLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  quickStats: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.black.card,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: theme.colors.grey[800],
+  },
+  quickStatItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  quickStatDivider: {
+    width: 1,
+    backgroundColor: theme.colors.grey[800],
+  },
+  quickStatValue: {
     fontSize: 20,
+    fontWeight: '700',
+    color: theme.colors.white.pure,
+    marginBottom: 4,
+  },
+  quickStatLabel: {
+    fontSize: 12,
     color: theme.colors.grey[500],
   },
-  gaugeContainer: {
-    alignItems: 'center',
+  section: {
+    marginBottom: 24,
   },
-
-  // Breakdown
-  breakdownCard: {
-    marginBottom: theme.spacing.xl,
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.white.pure,
+    marginBottom: 16,
   },
-  breakdownItem: {
+  allocationContainer: {
+    backgroundColor: theme.colors.black.card,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.grey[800],
+  },
+  allocationBar: {
+    flexDirection: 'row',
+    height: 24,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  allocationSegment: {
+    height: '100%',
+  },
+  allocationLegend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  allocationLegendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
+    gap: 6,
   },
-  breakdownLabel: {
-    width: 100,
+  allocationDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  allocationLegendText: {
     fontSize: 13,
     color: theme.colors.grey[400],
   },
-  breakdownBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: theme.colors.grey[900],
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  breakdownBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  breakdownScore: {
-    width: 36,
+  allocationLegendPercent: {
     fontSize: 13,
     fontWeight: '600',
-    textAlign: 'right',
-  },
-
-  // Recommendations
-  recCard: {
-    flexDirection: 'row',
-    gap: 12,
-    padding: 14,
-    backgroundColor: theme.colors.black.card,
-    borderWidth: 1,
-    borderColor: theme.colors.grey[800],
-    borderRadius: 12,
-    borderLeftWidth: 3,
-    marginBottom: 10,
-  },
-  recIcon: {
-    marginTop: 2,
-  },
-  recContent: {
-    flex: 1,
-    gap: 4,
-  },
-  recText: {
-    fontSize: 14,
-    fontWeight: '500',
     color: theme.colors.white.pure,
   },
-  recSuggestion: {
-    fontSize: 12,
-    color: theme.colors.grey[500],
-    lineHeight: 18,
-  },
-
-  // Allocation
-  allocCard: {
+  riskFactorCard: {
     backgroundColor: theme.colors.black.card,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: theme.colors.grey[800],
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
   },
-  allocHeader: {
+  riskFactorHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
-  },
-  allocDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  allocName: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '500',
-    color: theme.colors.white.pure,
-  },
-  allocPercent: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.grey[500],
-  },
-  allocBarTrack: {
-    height: 6,
-    backgroundColor: theme.colors.grey[900],
-    borderRadius: 3,
-    overflow: 'hidden',
     marginBottom: 8,
   },
-  allocBarFill: {
-    height: '100%',
-    borderRadius: 3,
+  riskFactorIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  allocFooter: {
+  riskFactorTitleContainer: {
+    flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  allocValue: {
-    fontSize: 12,
-    color: theme.colors.grey[500],
-  },
-  allocRisk: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-
-  // Volatility
-  volItem: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
   },
-  volSymbol: {
-    width: 50,
-    fontSize: 13,
+  riskFactorTitle: {
+    fontSize: 15,
     fontWeight: '600',
     color: theme.colors.white.pure,
   },
-  volBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: theme.colors.grey[900],
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  volBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  volValue: {
-    width: 40,
-    fontSize: 12,
+  riskFactorValue: {
+    fontSize: 14,
     fontWeight: '600',
-    textAlign: 'right',
+  },
+  riskFactorDescription: {
+    fontSize: 13,
+    color: theme.colors.grey[500],
+    marginLeft: 48,
+  },
+  moversContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  moverColumn: {
+    flex: 1,
+    backgroundColor: theme.colors.black.card,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.grey[800],
+  },
+  moverColumnTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.white.pure,
+    marginBottom: 12,
+  },
+  moverItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.grey[900],
+  },
+  moverSymbol: {
+    fontSize: 14,
+    color: theme.colors.white.pure,
+  },
+  moverGain: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#22C55E',
+  },
+  moverLoss: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
+  noMovers: {
+    fontSize: 13,
+    color: theme.colors.grey[500],
+    fontStyle: 'italic',
+  },
+  recommendationsCard: {
+    backgroundColor: theme.colors.black.card,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.gold.dark,
+  },
+  recommendationItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  recommendationBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.gold.primary,
+    marginTop: 6,
+    marginRight: 12,
+  },
+  recommendationText: {
+    flex: 1,
+    fontSize: 14,
+    color: theme.colors.grey[300],
+    lineHeight: 20,
+  },
+  summaryCard: {
+    backgroundColor: theme.colors.black.card,
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: theme.colors.grey[800],
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.grey[900],
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: theme.colors.grey[500],
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.white.pure,
   },
 });

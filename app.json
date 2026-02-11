@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#050505"
+        "backgroundColor": "#D4AF37"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.vault.app"
